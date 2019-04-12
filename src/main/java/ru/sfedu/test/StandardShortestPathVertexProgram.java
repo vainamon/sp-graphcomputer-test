@@ -403,14 +403,14 @@ public class StandardShortestPathVertexProgram implements VertexProgram<Triplet<
         if (pathProperty.isPresent()) {
             if (isEndVertex(vertex)) {
                 final Map<Vertex, Pair<Number, Set<Path>>> paths = pathProperty.value();
-                final List<Path> result = new ArrayList<>();
+                final List<Pair<Path, Number>> result = new ArrayList<>();
 
                 for (final Pair<Number, Set<Path>> pair : paths.values()) {
                     for (final Path path : pair.getValue1()) {
                         if (this.distanceEqualsNumberOfHops ||
                                 this.maxDistance == null ||
                                 NumberHelper.compare(pair.getValue0(), this.maxDistance) <= 0) {
-                            result.add(path);
+                            result.add(Pair.with(path, pair.getValue0()));
                         }
                     }
                 }

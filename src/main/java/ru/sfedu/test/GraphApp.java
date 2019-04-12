@@ -8,7 +8,6 @@ import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.tinkerpop.gremlin.process.computer.ComputerResult;
-import org.apache.tinkerpop.gremlin.process.computer.search.path.ShortestPathVertexProgram;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Graph;
@@ -20,6 +19,7 @@ import org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceEdge;
 import org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceVertex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.javatuples.Pair;
 
 public class GraphApp {
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphApp.class);
@@ -123,7 +123,7 @@ public class GraphApp {
             g.V(H).as("a").V(D).addE("adjacent#1").property("distance", 17).from("a").next();
             g.V(H).as("a").V(I).addE("adjacent").property("distance", 15).from("a").next();
 
-            g.V(D).as("a").V(H).addE("adjacent#2").property("distance", 17).from("a").next();
+            //g.V(D).as("a").V(H).addE("adjacent#2").property("distance", 17).from("a").next();
             g.V(D).as("a").V(I).addE("adjacent").property("distance", 21).from("a").next();
 
             if (supportsTransactions) {
@@ -202,27 +202,50 @@ public class GraphApp {
                     .distanceProperty("distance")
                     .source(__.has("label", "A"))
                     .target(__.has("label", "D"))
-                    .edgeDirection(Direction.OUT)
+                    .edgeDirection(Direction.BOTH)
                     .create();
 
             ComputerResult result = graph.compute().program(spvp).submit().get();
 
-            List<Path> paths = result.memory().get(StandardShortestPathVertexProgram.SHORTEST_PATHS);
+            List<Pair<Path, Number>> paths = result.memory().get(StandardShortestPathVertexProgram.SHORTEST_PATHS);
 
-            LOGGER.info("Runtime = " + result.memory().getRuntime() + "ms");
+            LOGGER.info("Runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
             LOGGER.info("Path's count = " + paths.size());
-            LOGGER.info("Path 0: " + paths.get(0).toString());
+            LOGGER.info("Path 0: " + paths.get(0).getValue0().toString());
 
-            Integer distance = paths.get(0).stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
+            Integer distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
                     .mapToInt(re -> ((Integer) g.E(re.getValue0()).next().properties("distance").next().value()))
                     .sum();
 
-            LOGGER.info("Path's distance: " + distance);
+            LOGGER.info("Path's distance: " + distance + "; " + paths.get(0).getValue1());
 
-            paths.forEach(p -> {LOGGER.info("Path " + paths.indexOf(p));
-                    p.forEach(re -> LOGGER.info(re instanceof  ReferenceVertex ?
+            /*paths.forEach(p -> {LOGGER.info("Path " + paths.indexOf(p));
+                    p.getValue0().forEach(re -> LOGGER.info(re instanceof  ReferenceVertex ?
                         g.V(re).next().properties("label").next().toString()
-                        : g.E(re).next().properties("distance").next().toString() + " " + g.E(re).next().toString())); });
+                        : g.E(re).next().properties("distance").next().toString() + " " + g.E(re).next().toString())); });*/
+
+            SACOShortestPathVertexProgram sacospvp = SACOShortestPathVertexProgram.build()
+                    .includeEdges(true)
+                    .distanceProperty("distance")
+                    .source(__.has("label", "A"))
+                    .target(__.has("label", "D"))
+                    .edgeDirection(Direction.BOTH)
+                    .antsNumber(4)
+                    .rho(0.01)
+                    .iterations(5)
+                    .create();
+
+            result = graph.compute().program(sacospvp).submit().get();
+
+            LOGGER.info("Ant runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
+            LOGGER.info("Ant path's count = " + paths.size());
+            LOGGER.info("Ant path 0: " + paths.get(0).getValue0().toString());
+
+            distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
+                    .mapToInt(re -> ((Integer) g.E(re.getValue0()).next().properties("distance").next().value()))
+                    .sum();
+
+            LOGGER.info("Ant path's distance: " + distance + "; " + paths.get(0).getValue1());
 
             if (supportsTransactions) {
                 g.tx().commit();
