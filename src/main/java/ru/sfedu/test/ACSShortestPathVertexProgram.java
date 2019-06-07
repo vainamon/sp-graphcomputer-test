@@ -59,35 +59,38 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
-public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortestPathVertexProgram.Ant> {
+public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPathVertexProgram.Ant> {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(SACOShortestPathVertexProgram.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ACSShortestPathVertexProgram.class);
 
     @SuppressWarnings("WeakerAccess")
-    public static final String SHORTEST_PATHS = "ru.sfedu.test.SACOShortestPathVertexProgram.shortestPaths";
+    public static final String SHORTEST_PATHS = "ru.sfedu.test.ACSShortestPathVertexProgram.shortestPaths";
 
-    private static final String SOURCE_VERTEX_FILTER = "ru.sfedu.test.SACOShortestPathVertexProgram.sourceVertexFilter";
-    private static final String TARGET_VERTEX_FILTER = "ru.sfedu.test.SACOShortestPathVertexProgram.targetVertexFilter";
-    private static final String EDGE_TRAVERSAL = "ru.sfedu.test.SACOShortestPathVertexProgram.edgeTraversal";
-    private static final String DISTANCE_TRAVERSAL = "ru.sfedu.test.SACOShortestPathVertexProgram.distanceTraversal";
-    private static final String MAX_DISTANCE = "ru.sfedu.test.SACOShortestPathVertexProgram.maxDistance";
-    private static final String INCLUDE_EDGES = "ru.sfedu.test.SACOShortestPathVertexProgram.includeEdges";
-    private static final String ANTS_NUMBER = "ru.sfedu.test.SACOShortestPathVertexProgram.antsNumber";
-    private static final String ALPHA = "ru.sfedu.test.SACOShortestPathVertexProgram.alpha";
-    private static final String RHO = "ru.sfedu.test.SACOShortestPathVertexProgram.rho";
-    private static final String ITERATIONS = "ru.sfedu.test.SACOShortestPathVertexProgram.iterations";
+    private static final String SOURCE_VERTEX_FILTER = "ru.sfedu.test.ACSShortestPathVertexProgram.sourceVertexFilter";
+    private static final String TARGET_VERTEX_FILTER = "ru.sfedu.test.ACSShortestPathVertexProgram.targetVertexFilter";
+    private static final String EDGE_TRAVERSAL = "ru.sfedu.test.ACSShortestPathVertexProgram.edgeTraversal";
+    private static final String DISTANCE_TRAVERSAL = "ru.sfedu.test.ACSShortestPathVertexProgram.distanceTraversal";
+    private static final String MAX_DISTANCE = "ru.sfedu.test.ACSShortestPathVertexProgram.maxDistance";
+    private static final String INCLUDE_EDGES = "ru.sfedu.test.ACSShortestPathVertexProgram.includeEdges";
+    private static final String ANTS_NUMBER = "ru.sfedu.test.ACSShortestPathVertexProgram.antsNumber";
+    private static final String ALPHA = "ru.sfedu.test.ACSShortestPathVertexProgram.alpha";
+    private static final String BETA = "ru.sfedu.test.ACSShortestPathVertexProgram.beta";
+    private static final String RHO = "ru.sfedu.test.ACSShortestPathVertexProgram.rho";
+    private static final String Q0 = "ru.sfedu.test.ACSShortestPathVertexProgram.q0";
+    private static final String TAU0 = "ru.sfedu.test.ACSShortestPathVertexProgram.tau0";
+    private static final String ITERATIONS = "ru.sfedu.test.ACSShortestPathVertexProgram.iterations";
 
-    private static final String EDGE_PHEROMONE = "ru.sfedu.test.SACOShortestPathVertexProgram.pheromone";
-    private static final String STATE = "ru.sfedu.test.SACOShortestPathVertexProgram.state";
-    private static final String PATHS = "ru.sfedu.test.SACOShortestPathVertexProgram.paths";
-    private static final String VOTE_TO_HALT = "ru.sfedu.test.SACOShortestPathVertexProgram.voteToHalt";
-    private static final String ITERATION = "ru.sfedu.test.SACOShortestPathVertexProgram.iteration";
+    private static final String EDGE_PHEROMONE = "ru.sfedu.test.ACSShortestPathVertexProgram.pheromone";
+    private static final String STATE = "ru.sfedu.test.ACSShortestPathVertexProgram.state";
+    private static final String PATHS = "ru.sfedu.test.ACSShortestPathVertexProgram.paths";
+    private static final String VOTE_TO_HALT = "ru.sfedu.test.ACSShortestPathVertexProgram.voteToHalt";
+    private static final String ITERATION = "ru.sfedu.test.ACSShortestPathVertexProgram.iteration";
 
     private static final int INIT = 0;
     private static final int SPAWN = 1;
     private static final int SEARCH = 2;
-    private static final int PHEROMONE_EVAPORATION = 3;
-    private static final int COLLECT_PATHS = 4;
+    private static final int GLOBAL_PHEROMONE_UPDATE = 3;
+    private static final int COLLECT_SHORTEST_PATHS = 4;
 
     public static final PureTraversal<Vertex, ?> DEFAULT_VERTEX_FILTER_TRAVERSAL = new PureTraversal<>(
             __.<Vertex>identity().asAdmin()); // todo: new IdentityTraversal<>()
@@ -106,7 +109,10 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
     private boolean includeEdges;
     private Integer antsNumber;
     private Number alpha;
+    private Number beta;
     private Number rho;
+    private Number q0;
+    private Number tau0;
     private Integer iterations;
 
     private static final Set<VertexComputeKey> VERTEX_COMPUTE_KEYS = new HashSet<>(Arrays.asList(
@@ -117,7 +123,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
             MemoryComputeKey.of(STATE, Operator.assign, true, true),
             MemoryComputeKey.of(ITERATION, Operator.assign, true, true)));
 
-    private SACOShortestPathVertexProgram() {
+    private ACSShortestPathVertexProgram() {
 
     }
 
@@ -142,12 +148,27 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
         if (configuration.containsKey(ALPHA))
             this.alpha = (Number) configuration.getProperty(ALPHA);
         else
-            this.alpha = 2;
+            this.alpha = 0.1;
+
+        if (configuration.containsKey(BETA))
+            this.beta = (Number) configuration.getProperty(BETA);
+        else
+            this.beta = 2;
 
         if (configuration.containsKey(RHO))
             this.rho = (Number) configuration.getProperty(RHO);
         else
-            this.rho = 0;
+            this.rho = 0.1;
+
+        if (configuration.containsKey(Q0))
+            this.q0 = (Number) configuration.getProperty(Q0);
+        else
+            this.q0 = 0.9;
+
+        if (configuration.containsKey(TAU0))
+            this.tau0 = (Number) configuration.getProperty(TAU0);
+        else
+            this.tau0 = 1.0;
 
         this.distanceEqualsNumberOfHops = this.distanceTraversal.equals(DEFAULT_DISTANCE_TRAVERSAL);
         this.includeEdges = configuration.getBoolean(INCLUDE_EDGES, false);
@@ -170,8 +191,14 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
             configuration.setProperty(MAX_DISTANCE, maxDistance);
         if (this.alpha != null)
             configuration.setProperty(ALPHA, alpha);
+        if (this.beta != null)
+            configuration.setProperty(BETA, beta);
         if (this.rho != null)
             configuration.setProperty(RHO, rho);
+        if (this.q0 != null)
+            configuration.setProperty(Q0, q0);
+        if (this.tau0 != null)
+            configuration.setProperty(TAU0, tau0);
         if (this.iterations != null)
             configuration.setProperty(ITERATIONS, iterations);
     }
@@ -194,7 +221,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
     @Override
     public VertexProgram<Ant> clone() {
         try {
-            final SACOShortestPathVertexProgram clone = (SACOShortestPathVertexProgram) super.clone();
+            final ACSShortestPathVertexProgram clone = (ACSShortestPathVertexProgram) super.clone();
             if (null != this.edgeTraversal)
                 clone.edgeTraversal = this.edgeTraversal.clone();
             if (null != this.sourceVertexFilterTraversal)
@@ -277,24 +304,9 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
                             paths.put(nextAnt.sourceVertex(), Pair.with(nextAnt.distance(), nextAnt.path()));
                             vertex.property(VertexProperty.Cardinality.single, PATHS, paths);
                         }
-
-                        nextAnt.setBackwardDirection();
-
-                        moveAntBackward(nextAnt, vertex, messenger);
-
-                        voteToHalt = false;
-                    } else if (isStartVertex(vertex)) {
-                        if (nextAnt.direction() == AntDirection.FROM_SOURCE) {
-                            moveAntForward(nextAnt, vertex, messenger);
-                            voteToHalt = false;
-                        } else {
-                            // LOGGER.info(nextAnt.toString());
-                        }
                     } else {
                         if (nextAnt.direction() == AntDirection.FROM_SOURCE)
                             moveAntForward(nextAnt, vertex, messenger);
-                        else
-                            moveAntBackward(nextAnt, vertex, messenger);
 
                         voteToHalt = false;
                     }
@@ -302,15 +314,15 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
                 break;
 
-            case PHEROMONE_EVAPORATION:
+            case COLLECT_SHORTEST_PATHS:
 
-                evaporatePheromone(vertex);
+                collectShortestPaths(vertex, memory);
 
                 break;
 
-            case COLLECT_PATHS:
+            case GLOBAL_PHEROMONE_UPDATE:
 
-                collectShortestPaths(vertex, memory);
+                updatePheromone(vertex, memory);
 
                 break;
 
@@ -344,17 +356,27 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
             }
 
             if (state == SEARCH) {
-                if (iteration + 1 <= iterations) {
-                    memory.set(STATE, PHEROMONE_EVAPORATION);
+                    memory.set(STATE, COLLECT_SHORTEST_PATHS);
 
                     memory.set(ITERATION, iteration + 1);
-                } else
-                    memory.set(STATE, COLLECT_PATHS);
 
-                return false;
+                    memory.set(SHORTEST_PATHS, new ArrayList<>());
+
+                    return false;
             }
-            if (state == PHEROMONE_EVAPORATION) {
-                memory.set(STATE, INIT);
+
+            if (state == COLLECT_SHORTEST_PATHS) {
+                if (iteration <= iterations) {
+                    memory.set(STATE, GLOBAL_PHEROMONE_UPDATE);
+
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (state == GLOBAL_PHEROMONE_UPDATE) {
+                memory.set(STATE, SPAWN);
 
                 return false;
             }
@@ -416,52 +438,83 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
         Iterator<Edge> edgesIterator = edgesList.iterator();
 
-        int predecessorIndex = 0;
         int edgeIndex = 0;
 
-        if (edgesIterator.hasNext()) {
+        if (Math.random() < q0.doubleValue()) {
+            int argmax = 0;
+            double max = 0;
+
             while (edgesIterator.hasNext()) {
                 final Edge edge = edgesIterator.next();
                 final Double tau = Double.valueOf(edge.property(EDGE_PHEROMONE).value().toString());
 
-                if ((!edge.equals(predecessor)) || (edgesList.size() <= 1))
-                    probabilitiesSum += Math.pow(tau, alpha.doubleValue());
-                else
-                    if (predecessor != null)
-                        predecessorIndex = edgeIndex;
+                if ((!edge.equals(predecessor)) && (tau * Math.pow(1 / getDistance(edge).doubleValue(), beta.doubleValue()) > max)) {
+                    argmax = edgeIndex;
+                    max = tau * Math.pow(1 / getDistance(edge).doubleValue(), beta.doubleValue());
+                }
 
                 edgeIndex++;
             }
-
-            int randomEdge = (int) (Math.random() * edgesList.size());
-
-            if (predecessor != null)
-                randomEdge = (randomEdge == predecessorIndex) ?
-                        (edgesList.size() <= 1) ?
-                                0 :
-                                (randomEdge + 1 >= edgesList.size()) ?
-                                        randomEdge - 1 : randomEdge + 1
-
-                        : randomEdge;
 
             edgeIndex = 0;
             edgesIterator = edgesList.iterator();
 
             while (edgesIterator.hasNext()) {
                 final Edge edge = edgesIterator.next();
-                final Double tau = Double.valueOf(edge.property(EDGE_PHEROMONE).value().toString());
 
-                Double edgeProbability = probabilitiesSum == 0 ?
-                        edgeIndex == randomEdge ? 1 : 0
-                        : Math.pow(tau, alpha.doubleValue()) / probabilitiesSum;
+                Double edgeProbability = (edgeIndex == argmax) ? 1.0 : 0.0;
 
-                if ((!edge.equals(predecessor)) || (edgesList.size() <= 1)) {
-                    result.add(Pair.with(edge, edgeProbability));
-                }
+                result.add(Pair.with(edge, edgeProbability));
 
                 edgeIndex++;
             }
-        }
+
+        } else {
+            int predecessorIndex = 0;
+
+            if (edgesIterator.hasNext()) {
+                while (edgesIterator.hasNext()) {
+                    final Edge edge = edgesIterator.next();
+                    final Double tau = Double.valueOf(edge.property(EDGE_PHEROMONE).value().toString());
+
+                    if ((!edge.equals(predecessor)) || (edgesList.size() <= 1))
+                        probabilitiesSum += tau * Math.pow(1 / getDistance(edge).doubleValue(), beta.doubleValue());
+                    else if (predecessor != null)
+                        predecessorIndex = edgeIndex;
+
+                    edgeIndex++;
+                }
+
+                int randomEdge = (int) (Math.random() * edgesList.size());
+
+                if (predecessor != null)
+                    randomEdge = (randomEdge == predecessorIndex) ?
+                            (edgesList.size() <= 1) ?
+                                    0 :
+                                    (randomEdge + 1 >= edgesList.size()) ?
+                                            randomEdge - 1 : randomEdge + 1
+
+                            : randomEdge;
+
+                edgeIndex = 0;
+                edgesIterator = edgesList.iterator();
+
+                while (edgesIterator.hasNext()) {
+                    final Edge edge = edgesIterator.next();
+                    final Double tau = Double.valueOf(edge.property(EDGE_PHEROMONE).value().toString());
+
+                    Double edgeProbability = probabilitiesSum == 0 ?
+                            edgeIndex == randomEdge ? 1.0 : 0
+                            : (tau * Math.pow(1/ getDistance(edge).doubleValue(), beta.doubleValue())) / probabilitiesSum;
+
+                    if ((!edge.equals(predecessor)) || (edgesList.size() <= 1)) {
+                        result.add(Pair.with(edge, edgeProbability));
+                    }
+
+                    edgeIndex++;
+                }
+            }
+        } // if (Math.random() < q0)
 
         return result;
     }
@@ -481,7 +534,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
                 Iterator<Pair<Edge, Double>> edgesIterator = edgesProbabilities.iterator();
 
-                while ((edgesIterator.hasNext()) && (cumulativeProbability < choice )) {
+                while ((edgesIterator.hasNext()) && (cumulativeProbability < choice)) {
                     final Pair<Edge, Double> edgeProbability = edgesIterator.next();
 
                     cumulativeProbability += edgeProbability.getValue1();
@@ -522,6 +575,12 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
                     if (otherV.equals(vertex))
                         otherV = edgeProbability.getValue0().outVertex();
 
+                    // local updating rule
+                    edgeProbability.getValue0().property(EDGE_PHEROMONE,
+                            Double.valueOf(edgeProbability.getValue0().property(EDGE_PHEROMONE).value().toString()) * (1 - rho.doubleValue())
+                            + rho.doubleValue() * tau0.doubleValue()
+                    );
+
                     ant.extendPath(vertex, edgeProbability.getValue0());
 
                     messenger.sendMessage(MessageScope.Global.of(otherV), ant);
@@ -530,38 +589,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
         }
     }
 
-    private void moveAntBackward(final Ant ant, final Vertex vertex, final Messenger<Ant> messenger) {
-        Edge backwardEdge = ant.getBackwardEdge();
-
-        final Traversal.Admin<Vertex, Edge> edgeTraversal = DEFAULT_EDGE_TRAVERSAL.getPure();
-        edgeTraversal.addStart(edgeTraversal.getTraverserGenerator().generate(vertex, edgeTraversal.getStartStep(), 1));
-
-        List<Edge> edgesList = edgeTraversal.toList();
-
-        Iterator<Edge> edgesIterator = edgesList.iterator();
-
-        while (edgesIterator.hasNext()) {
-            Edge edge = edgesIterator.next();
-
-            if (edge.equals(backwardEdge)) {
-                edge.property(EDGE_PHEROMONE,
-                        Double.valueOf(edge.property(EDGE_PHEROMONE).value().toString()) + 1.0 / ant.distance().doubleValue());
-
-                Vertex otherV = edge.inVertex();
-
-                if (otherV.equals(vertex))
-                    otherV = edge.outVertex();
-
-                ant.moveBackward();
-
-                messenger.sendMessage(MessageScope.Global.of(otherV), ant);
-
-                break;
-            }
-        }
-    }
-
-    private void evaporatePheromone(final Vertex vertex) {
+    private void updatePheromone(final Vertex vertex, final Memory memory) {
         final Traversal.Admin<Vertex, Edge> edgeTraversal = OUT_EDGE_TRAVERSAL.getPure();
         edgeTraversal.addStart(edgeTraversal.getTraverserGenerator().generate(vertex, edgeTraversal.getStartStep(), 1));
 
@@ -569,11 +597,23 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
         Iterator<Edge> edgesIterator = edgesList.iterator();
 
+        final ArrayList<Pair<Path, Number>> bestResult = memory.get(SHORTEST_PATHS);
+        final Path bestPath = bestResult.get(0).getValue0();
+        final Number bestLength = bestResult.get(0).getValue1();
+
         while (edgesIterator.hasNext()) {
             Edge edge = edgesIterator.next();
 
-            edge.property(EDGE_PHEROMONE,
-                    Double.valueOf(edge.property(EDGE_PHEROMONE).value().toString()) * (1 - rho.doubleValue()));
+
+            if (bestPath.objects().contains(edge)) {
+                edge.property(EDGE_PHEROMONE,
+                        Double.valueOf(edge.property(EDGE_PHEROMONE).value().toString()) * (1 - alpha.doubleValue())
+                                + alpha.doubleValue() / bestLength.doubleValue()
+                );
+            } else
+                edge.property(EDGE_PHEROMONE,
+                        Double.valueOf(edge.property(EDGE_PHEROMONE).value().toString()) * (1 - alpha.doubleValue())
+                );
         }
     }
 
@@ -591,6 +631,12 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
         return filterTraversal.hasNext();
     }
 
+    protected Number getDistance(final Edge edge) {
+        if (this.distanceEqualsNumberOfHops) return 1;
+        final Traversal.Admin<Edge, Number> traversal = this.distanceTraversal.getPure();
+        traversal.addStart(traversal.getTraverserGenerator().generate(edge, traversal.getStartStep(), 1));
+        return traversal.tryNext().orElse(0);
+    }
 
     private boolean exceedsMaxDistance(final Number distance) {
         // This method is used to stop the message sending for paths that exceed the specified maximum distance. Since
@@ -629,8 +675,6 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
                 memory.add(SHORTEST_PATHS, result);
             }
-
-            pathProperty.remove();
         }
     }
 
@@ -642,7 +686,6 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
         private Number distance = 0;
         private boolean distanceEqualsNumberOfHops = true;
         private PureTraversal<Edge, Number> distanceTraversal;
-        private int backwardEdge = 0;
 
         private Ant(String id) {
             this.id = id;
@@ -666,25 +709,14 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
             return id;
         }
 
-        public void setBackwardDirection() {
-            direction = AntDirection.FROM_DESTINATION;
-            backwardEdge = antPath.size() - 2;
-        }
-
-        public Vertex sourceVertex()
-        {
-            Object vertex =  antPath.size() > 0 ? antPath.get(0).getValue0() : null;
+        public Vertex sourceVertex() {
+            Object vertex = antPath.size() > 0 ? antPath.get(0).getValue0() : null;
 
             return vertex instanceof Vertex ? (Vertex) vertex : null;
         }
 
-        public ArrayList<Pair<Object, Number>> path()
-        {
+        public ArrayList<Pair<Object, Number>> path() {
             return this.antPath;
-        }
-
-        public void moveBackward() {
-            backwardEdge = backwardEdge - 2;
         }
 
         public void setDistanceTraversal(PureTraversal<Edge, Number> distanceTraversal) {
@@ -743,16 +775,8 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
             }
         }
 
-        private Edge getLastEdge()
-        {
+        private Edge getLastEdge() {
             Object edge = antPath.size() > 0 ? antPath.get(antPath.size() - 1).getValue0() : null;
-
-            return edge instanceof Edge ? (Edge) edge : null;
-        }
-
-        private Edge getBackwardEdge()
-        {
-            Object edge =  backwardEdge < antPath.size() ? antPath.get(backwardEdge).getValue0() : null;
 
             return edge instanceof Edge ? (Edge) edge : null;
         }
@@ -764,7 +788,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
     }
 
     enum AntDirection {
-        FROM_SOURCE, FROM_DESTINATION;
+        FROM_SOURCE
     }
 
     //////////////////////////////
@@ -778,7 +802,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
 
         private Builder() {
-            super(SACOShortestPathVertexProgram.class);
+            super(ACSShortestPathVertexProgram.class);
         }
 
         public Builder source(final Traversal<Vertex, ?> sourceVertexFilter) {
@@ -833,11 +857,35 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
             return this;
         }
 
+        public Builder beta(final Number beta) {
+            if (null != beta)
+                this.configuration.setProperty(BETA, beta);
+            else
+                this.configuration.clearProperty(BETA);
+            return this;
+        }
+
         public Builder rho(final Number rho) {
             if (null != rho)
                 this.configuration.setProperty(RHO, rho);
             else
                 this.configuration.clearProperty(RHO);
+            return this;
+        }
+
+        public Builder q0(final Number q0) {
+            if (null != q0)
+                this.configuration.setProperty(Q0, q0);
+            else
+                this.configuration.clearProperty(Q0);
+            return this;
+        }
+
+        public Builder tau0(final Number tau0) {
+            if (null != tau0)
+                this.configuration.setProperty(TAU0, tau0);
+            else
+                this.configuration.clearProperty(TAU0);
             return this;
         }
 

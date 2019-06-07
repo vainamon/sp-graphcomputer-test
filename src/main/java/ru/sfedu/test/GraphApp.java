@@ -84,7 +84,7 @@ public class GraphApp {
     /**
      * Adds the vertices, edges, and properties to the graph.
      */
-    public void createElements() {
+    public void createTestGraphElements() {
         try {
             // naive check if the graph was previously created
             if (g.V().has("label", "A").hasNext()) {
@@ -141,7 +141,61 @@ public class GraphApp {
     /**
      * Runs some traversal queries to get data from the graph.
      */
-    public void readElements() {
+    public void readTestGraphElements() {
+        try {
+            if (g == null) {
+                return;
+            }
+
+            LOGGER.info("reading elements");
+
+            final Optional<Map<Object, Object>> v = g.V().has("label", "A").valueMap().tryNext();
+            if (v.isPresent()) {
+                LOGGER.info(v.get().toString());
+            } else {
+                LOGGER.warn("A not found");
+            }
+
+        } finally {
+            // the default behavior automatically starts a transaction for
+            // any graph interaction, so it is best to finish the transaction
+            // even for read-only graph query operations
+            if (supportsTransactions) {
+                g.tx().rollback();
+            }
+        }
+    }
+
+    public void createGephiGraphElements() {
+        try {
+            // naive check if the graph was previously created
+            if (g.V().has("label", "A").hasNext()) {
+                if (supportsTransactions) {
+                    g.tx().rollback();
+                }
+                return;
+            }
+            LOGGER.info("creating elements");
+
+            ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+
+            g.io(classLoader.getResource("test1000.xml").getFile()).read().iterate();
+
+            LOGGER.info("Graph: nodes - " + g.V().count().next() + "; edges - " + g.E().count().next());
+
+            if (supportsTransactions) {
+                g.tx().commit();
+            }
+
+        } catch (Exception e) {
+            LOGGER.error(e.getMessage(), e);
+            if (supportsTransactions) {
+                g.tx().rollback();
+            }
+        }
+    }
+
+    public void readGephiGraphElements() {
         try {
             if (g == null) {
                 return;
@@ -170,7 +224,7 @@ public class GraphApp {
      * Deletes elements from the graph structure. When a vertex is deleted,
      * its incident edges are also deleted.
      */
-    public void deleteElements() {
+    public void deleteTestGraphElements() {
         try {
             if (g == null) {
                 return;
@@ -189,13 +243,12 @@ public class GraphApp {
         }
     }
 
-    public void runShortestPathComputer() {
+    public void runTestGraphShortestPathComputer() {
         try {
             if (g == null) {
                 return;
             }
             LOGGER.info("run shortest path");
-
 
             StandardShortestPathVertexProgram spvp = StandardShortestPathVertexProgram.build()
                     .includeEdges(true)
@@ -230,22 +283,198 @@ public class GraphApp {
                     .source(__.has("label", "A"))
                     .target(__.has("label", "D"))
                     .edgeDirection(Direction.BOTH)
-                    .antsNumber(4)
-                    .rho(0.01)
-                    .iterations(5)
+                    .antsNumber(10)
+                    .rho(0.1)
+                    .iterations(2)
                     .create();
 
             result = graph.compute().program(sacospvp).submit().get();
+            paths = result.memory().get(SACOShortestPathVertexProgram.SHORTEST_PATHS);
 
-            LOGGER.info("Ant runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
-            LOGGER.info("Ant path's count = " + paths.size());
-            LOGGER.info("Ant path 0: " + paths.get(0).getValue0().toString());
+            LOGGER.info("SACO Ant runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
+            LOGGER.info("SACO Ant path's count = " + paths.size());
+            LOGGER.info("SACO Ant path 0: " + paths.get(0).getValue0().toString());
 
             distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
                     .mapToInt(re -> ((Integer) g.E(re.getValue0()).next().properties("distance").next().value()))
                     .sum();
 
-            LOGGER.info("Ant path's distance: " + distance + "; " + paths.get(0).getValue1());
+            LOGGER.info("SACO Ant path's distance: " + distance + "; " + paths.get(0).getValue1());
+
+            ACSShortestPathVertexProgram acsspvp = ACSShortestPathVertexProgram.build()
+                    .includeEdges(true)
+                    .distanceProperty("distance")
+                    .source(__.has("label", "A"))
+                    .target(__.has("label", "D"))
+                    .edgeDirection(Direction.BOTH)
+                    .antsNumber(10)
+                    .rho(0.01)
+                    .q0(0.9)
+                    .beta(0.5)
+                    .tau0(0.1)
+                    .iterations(2)
+                    .create();
+
+            result = graph.compute().program(acsspvp).submit().get();
+            paths = result.memory().get(ACSShortestPathVertexProgram.SHORTEST_PATHS);
+
+            LOGGER.info("ACS Ant runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
+            LOGGER.info("ACS Ant path's count = " + paths.size());
+            LOGGER.info("ACS Ant path 0: " + paths.get(0).getValue0().toString());
+
+            distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
+                    .mapToInt(re -> ((Integer) g.E(re.getValue0()).next().properties("distance").next().value()))
+                    .sum();
+
+            LOGGER.info("ACS Ant path's distance: " + distance + "; " + paths.get(0).getValue1());
+
+            MMASShortestPathVertexProgram mmasspvp = MMASShortestPathVertexProgram.build()
+                    .includeEdges(true)
+                    .distanceProperty("distance")
+                    .source(__.has("label", "A"))
+                    .target(__.has("label", "D"))
+                    .edgeDirection(Direction.BOTH)
+                    .antsNumber(10)
+                    .rho(0.99)
+                    .q0(0.0)
+                    .maxfactor(2)
+                    .iterations(2)
+                    .create();
+
+            result = graph.compute().program(mmasspvp).submit().get();
+            paths = result.memory().get(MMASShortestPathVertexProgram.SHORTEST_PATHS);
+
+            LOGGER.info("MMAS Ant runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
+            LOGGER.info("MMAS Ant path's count = " + paths.size());
+            LOGGER.info("MMAS Ant path 0: " + paths.get(0).getValue0().toString());
+
+            distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
+                    .mapToInt(re -> ((Integer) g.E(re.getValue0()).next().properties("distance").next().value()))
+                    .sum();
+
+            LOGGER.info("MMAS Ant path's distance: " + distance + "; " + paths.get(0).getValue1());
+
+            if (supportsTransactions) {
+                g.tx().commit();
+            }
+        } catch (Exception e) {
+            LOGGER.error(e.getMessage(), e);
+            if (supportsTransactions) {
+                g.tx().rollback();
+            }
+        }
+    }
+
+    public void runGephiGraphShortestPathComputer() {
+        try {
+            if (g == null) {
+                return;
+            }
+            LOGGER.info("run shortest path");
+
+            StandardShortestPathVertexProgram spvp = StandardShortestPathVertexProgram.build()
+                    .includeEdges(true)
+                    .distanceProperty("weight")
+                    .source(__.has("label", "A"))
+                    .target(__.has("label", "B"))
+                    .edgeDirection(Direction.BOTH)
+                    .create();
+
+            ComputerResult result = graph.compute().program(spvp).submit().get();
+
+            List<Pair<Path, Number>> paths = result.memory().get(StandardShortestPathVertexProgram.SHORTEST_PATHS);
+
+            LOGGER.info("Runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
+            LOGGER.info("Path's count = " + paths.size());
+            //LOGGER.info("Path 0: " + paths.get(0).getValue0().toString());
+
+            Double distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
+                    .mapToDouble(re -> ((Double) g.E(re.getValue0()).next().properties("weight").next().value()))
+                    .sum();
+
+            LOGGER.info("Path's distance: " + distance + "; " + paths.get(0).getValue1());
+
+            /*paths.forEach(p -> {LOGGER.info("Path " + paths.indexOf(p));
+                    p.getValue0().forEach(re -> LOGGER.info(re instanceof  ReferenceVertex ?
+                        g.V(re).next().properties("label").next().toString()
+                        : g.E(re).next().properties("distance").next().toString() + " " + g.E(re).next().toString())); });*/
+
+            SACOShortestPathVertexProgram sacospvp = SACOShortestPathVertexProgram.build()
+                    .includeEdges(true)
+                    .distanceProperty("weight")
+                    .source(__.has("label", "A"))
+                    .target(__.has("label", "B"))
+                    .edgeDirection(Direction.BOTH)
+                    .antsNumber(10)
+                    .rho(0.01)
+                    .iterations(4)
+                    .create();
+
+            result = graph.compute().program(sacospvp).submit().get();
+            paths = result.memory().get(SACOShortestPathVertexProgram.SHORTEST_PATHS);
+
+            LOGGER.info("SACO Ant runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
+            LOGGER.info("SACO Ant path's count = " + paths.size());
+            //LOGGER.info("SACO Ant path 0: " + paths.get(0).getValue0().toString());
+
+            distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
+                    .mapToDouble(re -> ((Double) g.E(re.getValue0()).next().properties("weight").next().value()))
+                    .sum();
+
+            LOGGER.info("SACO Ant path's distance: " + distance + "; " + paths.get(0).getValue1());
+
+            ACSShortestPathVertexProgram acsspvp = ACSShortestPathVertexProgram.build()
+                    .includeEdges(true)
+                    .distanceProperty("weight")
+                    .source(__.has("label", "A"))
+                    .target(__.has("label", "B"))
+                    .edgeDirection(Direction.BOTH)
+                    .antsNumber(10)
+                    .rho(0.01)
+                    .q0(0.5)
+                    .beta(0.5)
+                    .tau0(0.01)
+                    .iterations(4)
+                    .create();
+
+            result = graph.compute().program(acsspvp).submit().get();
+            paths = result.memory().get(ACSShortestPathVertexProgram.SHORTEST_PATHS);
+
+            LOGGER.info("ACS Ant runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
+            LOGGER.info("ACS Ant path's count = " + paths.size());
+            //LOGGER.info("ACS Ant path 0: " + paths.get(0).getValue0().toString());
+
+            distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
+                    .mapToDouble(re -> ((Double) g.E(re.getValue0()).next().properties("weight").next().value()))
+                    .sum();
+
+            LOGGER.info("ACS Ant path's distance: " + distance + "; " + paths.get(0).getValue1());
+
+            MMASShortestPathVertexProgram mmasspvp = MMASShortestPathVertexProgram.build()
+                    .includeEdges(true)
+                    .distanceProperty("weight")
+                    .source(__.has("label", "A"))
+                    .target(__.has("label", "B"))
+                    .edgeDirection(Direction.BOTH)
+                    .antsNumber(10)
+                    .rho(0.01)
+                    .q0(0.0)
+                    .maxfactor(5)
+                    .iterations(4)
+                    .create();
+
+            result = graph.compute().program(mmasspvp).submit().get();
+            paths = result.memory().get(MMASShortestPathVertexProgram.SHORTEST_PATHS);
+
+            LOGGER.info("MMAS Ant runtime = " + result.memory().getRuntime() + "ms; iteration: " + result.memory().getIteration());
+            LOGGER.info("MMAS Ant path's count = " + paths.size());
+            //LOGGER.info("MMAS Ant path 0: " + paths.get(0).getValue0().toString());
+
+            distance = paths.get(0).getValue0().stream().filter(re -> re.getValue0() instanceof ReferenceEdge)
+                    .mapToDouble(re -> ((Double) g.E(re.getValue0()).next().properties("weight").next().value()))
+                    .sum();
+
+            LOGGER.info("MMAS Ant path's distance: " + distance + "; " + paths.get(0).getValue1());
 
             if (supportsTransactions) {
                 g.tx().commit();
@@ -269,16 +498,19 @@ public class GraphApp {
             }
 
             // build the graph structure
-            createElements();
+            //createTestGraphElements();
+            createGephiGraphElements();
             // read to see they were made
-            readElements();
+            //readTestGraphElements();
+            readGephiGraphElements();
 
-            runShortestPathComputer();
+            //runTestGraphShortestPathComputer();
+            runGephiGraphShortestPathComputer();
 
             // delete some graph elements
-            deleteElements();
+            //deleteTestGraphElements();
 
-            runShortestPathComputer();
+            //runTestGraphShortestPathComputer();
 
             // close the graph
             closeGraph();
