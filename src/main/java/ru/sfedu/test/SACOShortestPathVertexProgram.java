@@ -65,6 +65,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
     @SuppressWarnings("WeakerAccess")
     public static final String SHORTEST_PATHS = "ru.sfedu.test.SACOShortestPathVertexProgram.shortestPaths";
+    public static final String CYCLE_PATH_MAX_RATIOS = "ru.sfedu.test.SACOShortestPathVertexProgram.cycle_path_max_ratios";
 
     private static final String SOURCE_VERTEX_FILTER = "ru.sfedu.test.SACOShortestPathVertexProgram.sourceVertexFilter";
     private static final String TARGET_VERTEX_FILTER = "ru.sfedu.test.SACOShortestPathVertexProgram.targetVertexFilter";
@@ -82,6 +83,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
     private static final String PATHS = "ru.sfedu.test.SACOShortestPathVertexProgram.paths";
     private static final String VOTE_TO_HALT = "ru.sfedu.test.SACOShortestPathVertexProgram.voteToHalt";
     private static final String ITERATION = "ru.sfedu.test.SACOShortestPathVertexProgram.iteration";
+    private static final String CYCLE_PATH_MAX_RATIO = "ru.sfedu.test.SACOShortestPathVertexProgram.cycle_path_max_ratio";
 
     private static final int INIT = 0;
     private static final int SPAWN = 1;
@@ -109,13 +111,16 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
     private Number rho;
     private Integer iterations;
 
+    final long time = System.currentTimeMillis();
+
     private static final Set<VertexComputeKey> VERTEX_COMPUTE_KEYS = new HashSet<>(Arrays.asList(
             VertexComputeKey.of(PATHS, true)));
 
     private final Set<MemoryComputeKey> memoryComputeKeys = new HashSet<>(Arrays.asList(
             MemoryComputeKey.of(VOTE_TO_HALT, Operator.and, false, true),
             MemoryComputeKey.of(STATE, Operator.assign, true, true),
-            MemoryComputeKey.of(ITERATION, Operator.assign, true, true)));
+            MemoryComputeKey.of(ITERATION, Operator.assign, true, true),
+            MemoryComputeKey.of(CYCLE_PATH_MAX_RATIO, Operator.max, true, true)));
 
     private SACOShortestPathVertexProgram() {
 
@@ -155,6 +160,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
         this.iterations = configuration.getInteger(ITERATIONS, 10);
 
         this.memoryComputeKeys.add(MemoryComputeKey.of(SHORTEST_PATHS, Operator.addAll, true, false));
+        this.memoryComputeKeys.add(MemoryComputeKey.of(CYCLE_PATH_MAX_RATIOS, Operator.addAll, true, false));
     }
 
     @Override
@@ -224,6 +230,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
         memory.set(VOTE_TO_HALT, true);
         memory.set(STATE, INIT);
         memory.set(ITERATION, 1);
+        memory.set(CYCLE_PATH_MAX_RATIO, 0);
     }
 
     @Override
@@ -248,6 +255,9 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
             case SEARCH:
 
+                if (System.currentTimeMillis() - time > 60000)
+                    break;
+
                 final Iterator<Ant> antsIterator = messenger.receiveMessages();
 
                 while (antsIterator.hasNext()) {
@@ -259,7 +269,10 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
                         nextAnt.extendPath(vertex);
 
-                        nextAnt.removeCycles();
+                        Double cycledPath = nextAnt.removeCycles();
+
+                        memory.add(CYCLE_PATH_MAX_RATIO, cycledPath);
+
 
                         if (paths.containsKey(nextAnt.sourceVertex())) {
                             final Number currentShortestDistance = paths.get(nextAnt.sourceVertex()).getValue0();
@@ -304,11 +317,32 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
             case PHEROMONE_EVAPORATION:
 
+                if (isStartVertex(vertex)) {
+                    final List<Pair<Integer, Double>> result;
+                    final int iteration = memory.get(ITERATION);
+
+                    result = new ArrayList<>();
+
+                    result.add(new Pair<>(iteration - 1, memory.get(CYCLE_PATH_MAX_RATIO)));
+
+                    memory.add(CYCLE_PATH_MAX_RATIOS, result);
+                }
+
                 evaporatePheromone(vertex);
 
                 break;
 
             case COLLECT_PATHS:
+                if (isStartVertex(vertex)) {
+                    final List<Pair<Integer, Double>> result;
+                    final int iteration = memory.get(ITERATION);
+
+                    result = new ArrayList<>();
+
+                    result.add(new Pair<>(iteration, memory.get(CYCLE_PATH_MAX_RATIO)));
+
+                    memory.add(CYCLE_PATH_MAX_RATIOS, result);
+                }
 
                 collectShortestPaths(vertex, memory);
 
@@ -344,7 +378,7 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
             }
 
             if (state == SEARCH) {
-                if (iteration + 1 <= iterations) {
+                if ((iteration + 1 <= iterations)  && (System.currentTimeMillis() - time < 60000)) {
                     memory.set(STATE, PHEROMONE_EVAPORATION);
 
                     memory.set(ITERATION, iteration + 1);
@@ -353,8 +387,11 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
 
                 return false;
             }
+
             if (state == PHEROMONE_EVAPORATION) {
-                memory.set(STATE, INIT);
+                memory.set(CYCLE_PATH_MAX_RATIO, 0);
+
+                memory.set(STATE, SPAWN);
 
                 return false;
             }
@@ -692,11 +729,13 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
             this.distanceTraversal = distanceTraversal;
         }
 
-        public void removeCycles() {
+        public Double removeCycles() {
             ArrayList<Pair<Object, Number>> p = new ArrayList<>();
 
             Number newDistance = 0;
             boolean isCyclic = false;
+
+            int pathSize = antPath.size();
 
             for (int i = 0; i < antPath.size(); ++i) {
                 boolean inCycle = false;
@@ -723,6 +762,10 @@ public class SACOShortestPathVertexProgram implements VertexProgram<SACOShortest
                 antPath = p;
                 distance = newDistance;
             }
+
+            //LOGGER.info("Ant " + id + " - path: " + pathSize + " - after: " + antPath.size());
+
+            return (pathSize - 1) / Double.valueOf(antPath.size() - 1);
         }
 
         protected Number getDistance(final Edge edge) {

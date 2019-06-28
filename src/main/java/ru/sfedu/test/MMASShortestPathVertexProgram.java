@@ -65,6 +65,7 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
 
     @SuppressWarnings("WeakerAccess")
     public static final String SHORTEST_PATHS = "ru.sfedu.test.MMASShortestPathVertexProgram.shortestPaths";
+    public static final String CYCLE_PATH_MAX_RATIOS = "ru.sfedu.test.MMASShortestPathVertexProgram.cycle_path_max_ratios";
 
     private static final String SOURCE_VERTEX_FILTER = "ru.sfedu.test.MMASShortestPathVertexProgram.sourceVertexFilter";
     private static final String TARGET_VERTEX_FILTER = "ru.sfedu.test.MMASShortestPathVertexProgram.targetVertexFilter";
@@ -87,6 +88,7 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
     private static final String ITERATION = "ru.sfedu.test.MMASShortestPathVertexProgram.iteration";
     private static final String TAU_MIN = "ru.sfedu.test.MMASShortestPathVertexProgram.tau_min";
     private static final String TAU_MAX = "ru.sfedu.test.MMASShortestPathVertexProgram.tau_max";
+    private static final String CYCLE_PATH_MAX_RATIO = "ru.sfedu.test.MMASShortestPathVertexProgram.cycle_path_max_ratio";
 
     private static final int INIT = 0;
     private static final int SPAWN = 1;
@@ -116,6 +118,7 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
     private Number q0;
     private Number maxfactor;
     private Integer iterations;
+    final long time = System.currentTimeMillis();
 
     private static final Set<VertexComputeKey> VERTEX_COMPUTE_KEYS = new HashSet<>(Arrays.asList(
             VertexComputeKey.of(PATHS, true)));
@@ -125,7 +128,8 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
             MemoryComputeKey.of(STATE, Operator.assign, true, true),
             MemoryComputeKey.of(ITERATION, Operator.assign, true, true),
             MemoryComputeKey.of(TAU_MIN, Operator.assign, true, true),
-            MemoryComputeKey.of(TAU_MAX, Operator.assign, true, true)));
+            MemoryComputeKey.of(TAU_MAX, Operator.assign, true, true),
+            MemoryComputeKey.of(CYCLE_PATH_MAX_RATIO, Operator.max, true, true)));
 
     private MMASShortestPathVertexProgram() {
 
@@ -180,6 +184,7 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
         this.iterations = configuration.getInteger(ITERATIONS, 10);
 
         this.memoryComputeKeys.add(MemoryComputeKey.of(SHORTEST_PATHS, Operator.addAll, true, false));
+        this.memoryComputeKeys.add(MemoryComputeKey.of(CYCLE_PATH_MAX_RATIOS, Operator.addAll, true, false));
     }
 
     @Override
@@ -257,6 +262,7 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
         memory.set(ITERATION, 1);
         memory.set(TAU_MAX, 1.0);
         memory.set(TAU_MIN, 1.0 / maxfactor.doubleValue());
+        memory.set(CYCLE_PATH_MAX_RATIO, 0);
     }
 
     @Override
@@ -280,6 +286,8 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
                 break;
 
             case SEARCH:
+                if (System.currentTimeMillis() - time > 60000)
+                    break;
 
                 final Iterator<Ant> antsIterator = messenger.receiveMessages();
 
@@ -292,7 +300,10 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
 
                         nextAnt.extendPath(vertex);
 
-                        nextAnt.removeCycles();
+                        Double cycledPath = nextAnt.removeCycles();
+
+                        memory.add(CYCLE_PATH_MAX_RATIO, cycledPath);
+
 
                         if (paths.containsKey(nextAnt.sourceVertex())) {
                             final Number currentShortestDistance = paths.get(nextAnt.sourceVertex()).getValue0();
@@ -321,6 +332,17 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
                 break;
 
             case COLLECT_SHORTEST_PATHS:
+
+                if (isStartVertex(vertex)) {
+                    final List<Pair<Integer, Double>> result;
+                    final int iteration = memory.get(ITERATION);
+
+                    result = new ArrayList<>();
+
+                    result.add(new Pair<>(iteration, memory.get(CYCLE_PATH_MAX_RATIO)));
+
+                    memory.add(CYCLE_PATH_MAX_RATIOS, result);
+                }
 
                 collectShortestPaths(vertex, memory);
 
@@ -364,15 +386,17 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
             if (state == SEARCH) {
                 memory.set(STATE, COLLECT_SHORTEST_PATHS);
 
-                memory.set(ITERATION, iteration + 1);
-
                 memory.set(SHORTEST_PATHS, new ArrayList<>());
 
                 return false;
             }
 
             if (state == COLLECT_SHORTEST_PATHS) {
-                if (iteration <= iterations) {
+                if ((iteration + 1 <= iterations) && (System.currentTimeMillis() - time < 60000)) {
+                    memory.set(CYCLE_PATH_MAX_RATIO, 0);
+
+                    memory.set(ITERATION, iteration + 1);
+
                     memory.set(STATE, GLOBAL_PHEROMONE_UPDATE);
 
                     return false;
@@ -732,11 +756,13 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
             this.distanceTraversal = distanceTraversal;
         }
 
-        public void removeCycles() {
+        public Double removeCycles() {
             ArrayList<Pair<Object, Number>> p = new ArrayList<>();
 
             Number newDistance = 0;
             boolean isCyclic = false;
+
+            int pathSize = antPath.size();
 
             for (int i = 0; i < antPath.size(); ++i) {
                 boolean inCycle = false;
@@ -763,6 +789,10 @@ public class MMASShortestPathVertexProgram implements VertexProgram<MMASShortest
                 antPath = p;
                 distance = newDistance;
             }
+
+            //LOGGER.info("Ant " + id + " - path: " + pathSize + " - after: " + antPath.size());
+
+            return (pathSize - 1) / Double.valueOf(antPath.size() - 1);
         }
 
         protected Number getDistance(final Edge edge) {

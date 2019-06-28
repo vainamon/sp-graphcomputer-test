@@ -65,6 +65,7 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
 
     @SuppressWarnings("WeakerAccess")
     public static final String SHORTEST_PATHS = "ru.sfedu.test.ACSShortestPathVertexProgram.shortestPaths";
+    public static final String CYCLE_PATH_MAX_RATIOS = "ru.sfedu.test.ACSShortestPathVertexProgram.cycle_path_max_ratios";
 
     private static final String SOURCE_VERTEX_FILTER = "ru.sfedu.test.ACSShortestPathVertexProgram.sourceVertexFilter";
     private static final String TARGET_VERTEX_FILTER = "ru.sfedu.test.ACSShortestPathVertexProgram.targetVertexFilter";
@@ -85,6 +86,7 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
     private static final String PATHS = "ru.sfedu.test.ACSShortestPathVertexProgram.paths";
     private static final String VOTE_TO_HALT = "ru.sfedu.test.ACSShortestPathVertexProgram.voteToHalt";
     private static final String ITERATION = "ru.sfedu.test.ACSShortestPathVertexProgram.iteration";
+    private static final String CYCLE_PATH_MAX_RATIO = "ru.sfedu.test.ACSShortestPathVertexProgram.cycle_path_max_ratio";
 
     private static final int INIT = 0;
     private static final int SPAWN = 1;
@@ -115,13 +117,16 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
     private Number tau0;
     private Integer iterations;
 
+    final long time = System.currentTimeMillis();
+
     private static final Set<VertexComputeKey> VERTEX_COMPUTE_KEYS = new HashSet<>(Arrays.asList(
             VertexComputeKey.of(PATHS, true)));
 
     private final Set<MemoryComputeKey> memoryComputeKeys = new HashSet<>(Arrays.asList(
             MemoryComputeKey.of(VOTE_TO_HALT, Operator.and, false, true),
             MemoryComputeKey.of(STATE, Operator.assign, true, true),
-            MemoryComputeKey.of(ITERATION, Operator.assign, true, true)));
+            MemoryComputeKey.of(ITERATION, Operator.assign, true, true),
+            MemoryComputeKey.of(CYCLE_PATH_MAX_RATIO, Operator.max, true, true)));
 
     private ACSShortestPathVertexProgram() {
 
@@ -176,6 +181,7 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
         this.iterations = configuration.getInteger(ITERATIONS, 10);
 
         this.memoryComputeKeys.add(MemoryComputeKey.of(SHORTEST_PATHS, Operator.addAll, true, false));
+        this.memoryComputeKeys.add(MemoryComputeKey.of(CYCLE_PATH_MAX_RATIOS, Operator.addAll, true, false));
     }
 
     @Override
@@ -251,6 +257,7 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
         memory.set(VOTE_TO_HALT, true);
         memory.set(STATE, INIT);
         memory.set(ITERATION, 1);
+        memory.set(CYCLE_PATH_MAX_RATIO, 0);
     }
 
     @Override
@@ -275,6 +282,9 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
 
             case SEARCH:
 
+                if (System.currentTimeMillis() - time > 60000)
+                    break;
+
                 final Iterator<Ant> antsIterator = messenger.receiveMessages();
 
                 while (antsIterator.hasNext()) {
@@ -286,7 +296,9 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
 
                         nextAnt.extendPath(vertex);
 
-                        nextAnt.removeCycles();
+                        Double cycledPath = nextAnt.removeCycles();
+
+                        memory.add(CYCLE_PATH_MAX_RATIO, cycledPath);
 
                         if (paths.containsKey(nextAnt.sourceVertex())) {
                             final Number currentShortestDistance = paths.get(nextAnt.sourceVertex()).getValue0();
@@ -315,6 +327,17 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
                 break;
 
             case COLLECT_SHORTEST_PATHS:
+
+                if (isStartVertex(vertex)) {
+                    final List<Pair<Integer, Double>> result;
+                    final int iteration = memory.get(ITERATION);
+
+                    result = new ArrayList<>();
+
+                    result.add(new Pair<>(iteration, memory.get(CYCLE_PATH_MAX_RATIO)));
+
+                    memory.add(CYCLE_PATH_MAX_RATIOS, result);
+                }
 
                 collectShortestPaths(vertex, memory);
 
@@ -358,15 +381,17 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
             if (state == SEARCH) {
                     memory.set(STATE, COLLECT_SHORTEST_PATHS);
 
-                    memory.set(ITERATION, iteration + 1);
-
                     memory.set(SHORTEST_PATHS, new ArrayList<>());
 
                     return false;
             }
 
             if (state == COLLECT_SHORTEST_PATHS) {
-                if (iteration <= iterations) {
+                if ((iteration + 1 <= iterations) && (System.currentTimeMillis() - time < 60000)) {
+                    memory.set(CYCLE_PATH_MAX_RATIO, 0);
+
+                    memory.set(ITERATION, iteration + 1);
+
                     memory.set(STATE, GLOBAL_PHEROMONE_UPDATE);
 
                     return false;
@@ -724,11 +749,13 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
             this.distanceTraversal = distanceTraversal;
         }
 
-        public void removeCycles() {
+        public Double removeCycles() {
             ArrayList<Pair<Object, Number>> p = new ArrayList<>();
 
             Number newDistance = 0;
             boolean isCyclic = false;
+
+            int pathSize = antPath.size();
 
             for (int i = 0; i < antPath.size(); ++i) {
                 boolean inCycle = false;
@@ -755,6 +782,10 @@ public class ACSShortestPathVertexProgram implements VertexProgram<ACSShortestPa
                 antPath = p;
                 distance = newDistance;
             }
+
+            //LOGGER.info("Ant " + id + " - path: " + pathSize + " - after: " + antPath.size());
+
+            return (pathSize - 1) / Double.valueOf(antPath.size() - 1);
         }
 
         protected Number getDistance(final Edge edge) {
